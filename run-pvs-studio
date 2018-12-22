@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# https://www.viva64.com/en/m/0036/
+
+pvs-studio-analyzer trace -- make -B
+pvs-studio-analyzer analyze -l ~/.config/PVS-Studio/PVS-Studio.lic -o ~/pvs/cppcheck.log
+plog-converter -a GA:1,2 -t fullhtml -o ~/pvs/cppcheck.html ~/pvs/cppcheck.log
+rm -r /var/www/pvs-studio/cppcheck-linux/*
+cp -p -r ~/pvs/cppcheck.html/* /var/www/pvs-studio/cppcheck-linux/
+cd /var/www/pvs-studio
+svn add .
+svn commit -m "* cppcheck-linux"
+cd ~
