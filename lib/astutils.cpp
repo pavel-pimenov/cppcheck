@@ -372,17 +372,17 @@ bool isSameExpression(bool cpp, bool macro, const Token *tok1, const Token *tok2
         const Token * varTok1 = followVariableExpression(tok1, cpp, tok2);
         if (varTok1->str() == tok2->str()) {
             followVariableExpressionError(tok1, varTok1, errors);
-            return isSameExpression(cpp, macro, varTok1, tok2, library, true, errors);
+            return isSameExpression(cpp, macro, varTok1, tok2, library, true, followVar, errors);
         }
         const Token * varTok2 = followVariableExpression(tok2, cpp, tok1);
         if (tok1->str() == varTok2->str()) {
             followVariableExpressionError(tok2, varTok2, errors);
-            return isSameExpression(cpp, macro, tok1, varTok2, library, true, errors);
+            return isSameExpression(cpp, macro, tok1, varTok2, library, true, followVar, errors);
         }
         if (varTok1->str() == varTok2->str()) {
             followVariableExpressionError(tok1, varTok1, errors);
             followVariableExpressionError(tok2, varTok2, errors);
-            return isSameExpression(cpp, macro, varTok1, varTok2, library, true, errors);
+            return isSameExpression(cpp, macro, varTok1, varTok2, library, true, followVar, errors);
         }
     }
     if (tok1->varId() != tok2->varId() || tok1->str() != tok2->str() || tok1->originalName() != tok2->originalName()) {
@@ -1050,6 +1050,9 @@ bool isConstVarExpression(const Token *tok)
         std::vector<const Token *> args = getArguments(tok);
         return std::all_of(args.begin(), args.end(), &isConstVarExpression);
     }
+    if (Token::simpleMatch(tok->previous(), "> (") && tok->astOperand2() && tok->astOperand1()->str().find("_cast") != std::string::npos) {
+        return isConstVarExpression(tok->astOperand2());
+    }
     if (Token::Match(tok, "( %type%"))
         return isConstVarExpression(tok->astOperand1());
     if (Token::Match(tok, "%cop%")) {
@@ -1118,6 +1121,10 @@ struct FwdAnalysis::Result FwdAnalysis::checkRecursive(const Token *expr, const 
         }
 
         if (tok->str() == "}") {
+            // Known value => possible value
+            if (tok->scope() == expr->scope())
+                mValueFlowKnown = false;
+
             Scope::ScopeType scopeType = tok->scope()->type;
             if (scopeType == Scope::eWhile || scopeType == Scope::eFor || scopeType == Scope::eDo) {
                 // check condition
@@ -1165,11 +1172,18 @@ struct FwdAnalysis::Result FwdAnalysis::checkRecursive(const Token *expr, const 
         if (exprVarIds.find(tok->varId()) != exprVarIds.end()) {
             const Token *parent = tok;
             bool other = false;
-            bool same = false;
+            bool same = tok->astParent() && isSameExpression(mCpp, false, expr, tok, mLibrary, false, false, nullptr);
             while (Token::Match(parent->astParent(), "*|.|::|[")) {
                 parent = parent->astParent();
-                if (parent && isSameExpression(mCpp, false, expr, parent->astOperand1(), mLibrary, false, false, nullptr))
+                if (parent && isSameExpression(mCpp, false, expr, parent, mLibrary, false, false, nullptr)) {
                     same = true;
+                    if (mWhat == What::ValueFlow) {
+                        KnownAndToken v;
+                        v.known = mValueFlowKnown;
+                        v.token = parent;
+                        mValueFlow.push_back(v);
+                    }
+                }
                 if (!same && Token::Match(parent, ". %var%") && parent->next()->varId() && exprVarIds.find(parent->next()->varId()) == exprVarIds.end()) {
                     other = true;
                     break;
@@ -1191,9 +1205,11 @@ struct FwdAnalysis::Result FwdAnalysis::checkRecursive(const Token *expr, const 
                 if (reassign)
                     return Result(Result::Type::WRITE, parent->astParent());
                 return Result(Result::Type::READ);
+            } else if (Token::Match(parent->astParent(), "%assign%") && !parent->astParent()->astParent() && parent == parent->astParent()->astOperand1()) {
+                continue;
             } else {
                 // TODO: this is a quick bailout
-                return Result(Result::Type::BAILOUT);
+                return Result(Result::Type::BAILOUT, parent->astParent());
             }
         }
 
@@ -1204,9 +1220,13 @@ struct FwdAnalysis::Result FwdAnalysis::checkRecursive(const Token *expr, const 
             const Result &result1 = checkRecursive(expr, tok->tokAt(2), tok->linkAt(1), exprVarIds, local);
             if (result1.type == Result::Type::READ || result1.type == Result::Type::BAILOUT)
                 return result1;
+            if (mWhat == What::ValueFlow && result1.type == Result::Type::WRITE)
+                mValueFlowKnown = false;
             if (Token::simpleMatch(tok->linkAt(1), "} else {")) {
                 const Token *elseStart = tok->linkAt(1)->tokAt(2);
                 const Result &result2 = checkRecursive(expr, elseStart, elseStart->link(), exprVarIds, local);
+                if (mWhat == What::ValueFlow && result2.type == Result::Type::WRITE)
+                    mValueFlowKnown = false;
                 if (result2.type == Result::Type::READ || result2.type == Result::Type::BAILOUT)
                     return result2;
                 if (result1.type == Result::Type::WRITE && result2.type == Result::Type::WRITE)
@@ -1352,6 +1372,14 @@ bool FwdAnalysis::unusedValue(const Token *expr, const Token *startToken, const 
     mWhat = What::UnusedValue;
     Result result = check(expr, startToken, endToken);
     return (result.type == FwdAnalysis::Result::Type::NONE || result.type == FwdAnalysis::Result::Type::RETURN) && !possiblyAliased(expr, startToken);
+}
+
+std::vector<FwdAnalysis::KnownAndToken> FwdAnalysis::valueFlow(const Token *expr, const Token *startToken, const Token *endToken)
+{
+    mWhat = What::ValueFlow;
+    mValueFlowKnown = true;
+    check(expr, startToken, endToken);
+    return mValueFlow;
 }
 
 bool FwdAnalysis::possiblyAliased(const Token *expr, const Token *startToken) const

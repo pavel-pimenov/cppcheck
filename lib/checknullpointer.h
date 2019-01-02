@@ -24,6 +24,7 @@
 
 #include "check.h"
 #include "config.h"
+#include "ctu.h"
 #include "valueflow.h"
 
 #include <list>
@@ -85,7 +86,9 @@ public:
      * @param unknown it is not known if there is a pointer dereference (could be reported as a debug message)
      * @return true => there is a dereference
      */
-    static bool isPointerDeRef(const Token *tok, bool &unknown);
+    bool isPointerDeRef(const Token *tok, bool &unknown) const;
+
+    static bool isPointerDeRef(const Token *tok, bool &unknown, const Settings *settings);
 
     /** @brief possible null pointer dereference */
     void nullPointer();
@@ -100,14 +103,31 @@ public:
     }
     void nullPointerError(const Token *tok, const std::string &varname, const ValueFlow::Value* value, bool inconclusive);
 
-    bool isUnsafeFunction(const Scope *scope, int argnr, const Token **tok) const;
-private:
+    /* data for multifile checking */
+    class MyFileInfo : public Check::FileInfo {
+    public:
+        /** function arguments that are dereferenced without checking if they are null */
+        std::list<CTU::FileInfo::UnsafeUsage> unsafeUsage;
 
+        /** Convert MyFileInfo data into xml string */
+        std::string toString() const;
+    };
+
+    /** @brief Parse current TU and extract file info */
+    Check::FileInfo *getFileInfo(const Tokenizer *tokenizer, const Settings *settings) const override;
+
+    Check::FileInfo * loadFileInfoFromXml(const tinyxml2::XMLElement *xmlElement) const override;
+
+    /** @brief Analyse all file infos for all TU */
+    bool analyseWholeProgram(const CTU::FileInfo *ctu, const std::list<Check::FileInfo*> &fileInfo, const Settings& settings, ErrorLogger &errorLogger) override;
+
+private:
     /** Get error messages. Used by --errorlist */
     void getErrorMessages(ErrorLogger *errorLogger, const Settings *settings) const override {
         CheckNullPointer c(nullptr, settings, errorLogger);
         c.nullPointerError(nullptr, "pointer", nullptr, false);
-        c.arithmeticError(nullptr, nullptr);
+        c.pointerArithmeticError(nullptr, nullptr, false);
+        c.redundantConditionWarning(nullptr, nullptr, nullptr, false);
     }
 
     /** Name of check */
@@ -136,7 +156,8 @@ private:
 
     /** undefined null pointer arithmetic */
     void arithmetic();
-    void arithmeticError(const Token *tok, const ValueFlow::Value *value);
+    void pointerArithmeticError(const Token* tok, const ValueFlow::Value *value, bool inconclusive);
+    void redundantConditionWarning(const Token* tok, const ValueFlow::Value *value, const Token *condition, bool inconclusive);
 };
 /// @}
 //---------------------------------------------------------------------------

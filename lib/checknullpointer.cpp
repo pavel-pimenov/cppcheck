@@ -161,15 +161,37 @@ namespace {
  * @param unknown it is not known if there is a pointer dereference (could be reported as a debug message)
  * @return true => there is a dereference
  */
-bool CheckNullPointer::isPointerDeRef(const Token *tok, bool &unknown)
+bool CheckNullPointer::isPointerDeRef(const Token *tok, bool &unknown) const
+{
+    return isPointerDeRef(tok, unknown, mSettings);
+}
+
+bool CheckNullPointer::isPointerDeRef(const Token *tok, bool &unknown, const Settings *settings)
 {
     unknown = false;
+
+    // Is pointer used as function parameter?
+    if (Token::Match(tok->previous(), "[(,] %name% [,)]") && settings) {
+        const Token *ftok = tok->previous();
+        while (ftok && ftok->str() != "(") {
+            if (ftok->str() == ")")
+                ftok = ftok->link();
+            ftok = ftok->previous();
+        }
+        if (ftok && ftok->previous()) {
+            std::list<const Token *> varlist;
+            parseFunctionCall(*ftok->previous(), varlist, &settings->library);
+            if (std::find(varlist.begin(), varlist.end(), tok) != varlist.end()) {
+                return true;
+            }
+        }
+    }
 
     const Token* parent = tok->astParent();
     if (!parent)
         return false;
     if (parent->str() == "." && parent->astOperand2() == tok)
-        return isPointerDeRef(parent, unknown);
+        return isPointerDeRef(parent, unknown, settings);
     const bool firstOperand = parent->astOperand1() == tok;
     while (parent->str() == "(" && (parent->astOperand2() == nullptr && parent->strAt(1) != ")")) { // Skip over casts
         parent = parent->astParent();
@@ -338,24 +360,6 @@ void CheckNullPointer::nullPointerByDeRefAndChec()
 
         if (!printInconclusive && value->isInconclusive())
             continue;
-
-        // Is pointer used as function parameter?
-        if (Token::Match(tok->previous(), "[(,] %name% [,)]")) {
-            const Token *ftok = tok->previous();
-            while (ftok && ftok->str() != "(") {
-                if (ftok->str() == ")")
-                    ftok = ftok->link();
-                ftok = ftok->previous();
-            }
-            if (!ftok || !ftok->previous())
-                continue;
-            std::list<const Token *> varlist;
-            parseFunctionCall(*ftok->previous(), varlist, &mSettings->library);
-            if (std::find(varlist.begin(), varlist.end(), tok) != varlist.end()) {
-                nullPointerError(tok, tok->str(), value, value->isInconclusive());
-            }
-            continue;
-        }
 
         // Pointer dereference.
         bool unknown = false;
@@ -553,63 +557,136 @@ void CheckNullPointer::arithmetic()
                 continue;
             if (value->condition && !mSettings->isEnabled(Settings::WARNING))
                 continue;
-            arithmeticError(tok,value);
+            if (value->condition)
+                redundantConditionWarning(tok, value, value->condition, value->isInconclusive());
+            else
+                pointerArithmeticError(tok, value, value->isInconclusive());
         }
     }
 }
 
-void CheckNullPointer::arithmeticError(const Token *tok, const ValueFlow::Value *value)
+static std::string arithmeticTypeString(const Token *tok)
 {
-    std::string arithmetic;
     if (tok && tok->str()[0] == '-')
-        arithmetic = "subtraction";
+        return "subtraction";
     else if (tok && tok->str()[0] == '+')
-        arithmetic = "addition";
+        return "addition";
     else
-        arithmetic = "arithmetic";
+        return "arithmetic";
+}
 
+void CheckNullPointer::pointerArithmeticError(const Token* tok, const ValueFlow::Value *value, bool inconclusive)
+{
+    std::string arithmetic = arithmeticTypeString(tok);
     std::string errmsg;
     if (tok && tok->str()[0] == '-') {
-        if (value && value->condition)
-            errmsg = ValueFlow::eitherTheConditionIsRedundant(value->condition) + " or there is overflow in pointer " + arithmetic + ".";
-        else
-            errmsg = "Overflow in pointer arithmetic, NULL pointer is subtracted.";
+        errmsg = "Overflow in pointer arithmetic, NULL pointer is subtracted.";
     } else {
-        if (value && value->condition)
-            errmsg = ValueFlow::eitherTheConditionIsRedundant(value->condition) + " or there is pointer arithmetic with NULL pointer.";
-        else
-            errmsg = "Pointer " + arithmetic + " with NULL pointer.";
+        errmsg = "Pointer " + arithmetic + " with NULL pointer.";
     }
-
     const ErrorPath errorPath = getErrorPath(tok, value, "Null pointer " + arithmetic);
-
     reportError(errorPath,
-                (value && value->condition) ? Severity::warning : Severity::error,
-                (value && value->condition) ? "nullPointerArithmeticRedundantCheck" : "nullPointerArithmetic",
+                Severity::error,
+                "nullPointerArithmetic",
                 errmsg,
-                CWE682, // unknown - pointer overflow
-                value && value->isInconclusive());
+                CWE682,
+                inconclusive);
 }
 
-bool CheckNullPointer::isUnsafeFunction(const Scope *scope, int argnr, const Token **tok) const
+void CheckNullPointer::redundantConditionWarning(const Token* tok, const ValueFlow::Value *value, const Token *condition, bool inconclusive)
 {
-    const Variable * const argvar = scope->function->getArgumentVar(argnr);
-    if (!argvar->isPointer())
-        return false;
-    for (const Token *tok2 = scope->bodyStart; tok2 != scope->bodyEnd; tok2 = tok2->next()) {
-        if (Token::simpleMatch(tok2, ") {")) {
-            tok2 = tok2->linkAt(1);
-            if (Token::findmatch(tok2->link(), "return|throw", tok2))
-                return false;
-            if (isVariableChanged(tok2->link(), tok2, argvar->declarationId(), false, mSettings, mTokenizer->isCPP()))
-                return false;
-        }
-        if (tok2->variable() != argvar)
-            continue;
-        if (!Token::Match(tok2->astParent(), "*|["))
-            return false;
-        *tok = tok2;
-        return true;
+    std::string arithmetic = arithmeticTypeString(tok);
+    std::string errmsg;
+    if (tok && tok->str()[0] == '-') {
+        errmsg = ValueFlow::eitherTheConditionIsRedundant(condition) + " or there is overflow in pointer " + arithmetic + ".";
+    } else {
+        errmsg = ValueFlow::eitherTheConditionIsRedundant(condition) + " or there is pointer arithmetic with NULL pointer.";
     }
-    return false;
+    const ErrorPath errorPath = getErrorPath(tok, value, "Null pointer " + arithmetic);
+    reportError(errorPath,
+                Severity::warning,
+                "nullPointerArithmeticRedundantCheck",
+                errmsg,
+                CWE682,
+                inconclusive);
+}
+
+std::string CheckNullPointer::MyFileInfo::toString() const
+{
+    return CTU::toString(unsafeUsage);
+}
+
+static bool isUnsafeUsage(const Check *check, const Token *vartok)
+{
+    const CheckNullPointer *checkNullPointer = dynamic_cast<const CheckNullPointer *>(check);
+    bool unknown = false;
+    return checkNullPointer && checkNullPointer->isPointerDeRef(vartok, unknown);
+}
+
+Check::FileInfo *CheckNullPointer::getFileInfo(const Tokenizer *tokenizer, const Settings *settings) const
+{
+    CheckNullPointer check(tokenizer, settings, nullptr);
+    const std::list<CTU::FileInfo::UnsafeUsage> &unsafeUsage = CTU::getUnsafeUsage(tokenizer, settings, &check, ::isUnsafeUsage);
+    if (unsafeUsage.empty())
+        return nullptr;
+
+    MyFileInfo *fileInfo = new MyFileInfo;
+    fileInfo->unsafeUsage = unsafeUsage;
+    return fileInfo;
+}
+
+Check::FileInfo * CheckNullPointer::loadFileInfoFromXml(const tinyxml2::XMLElement *xmlElement) const
+{
+    const std::list<CTU::FileInfo::UnsafeUsage> &unsafeUsage = CTU::loadUnsafeUsageListFromXml(xmlElement);
+    if (unsafeUsage.empty())
+        return nullptr;
+
+    MyFileInfo *fileInfo = new MyFileInfo;
+    fileInfo->unsafeUsage = unsafeUsage;
+    return fileInfo;
+}
+
+bool CheckNullPointer::analyseWholeProgram(const CTU::FileInfo *ctu, const std::list<Check::FileInfo*> &fileInfo, const Settings& settings, ErrorLogger &errorLogger)
+{
+    if (!ctu)
+        return false;
+    bool foundErrors = false;
+    (void)settings; // This argument is unused
+
+    const std::map<std::string, std::list<const CTU::FileInfo::CallBase *>> callsMap = ctu->getCallsMap();
+
+    for (Check::FileInfo *fi1 : fileInfo) {
+        const MyFileInfo *fi = dynamic_cast<MyFileInfo*>(fi1);
+        if (!fi)
+            continue;
+        for (const CTU::FileInfo::UnsafeUsage &unsafeUsage : fi->unsafeUsage) {
+            for (int warning = 0; warning <= 1; warning++) {
+                if (warning == 1 && !settings.isEnabled(Settings::WARNING))
+                    break;
+
+                const std::list<ErrorLogger::ErrorMessage::FileLocation> &locationList =
+                    ctu->getErrorPath(CTU::FileInfo::InvalidValueType::null,
+                                      unsafeUsage,
+                                      callsMap,
+                                      "Dereferencing argument ARG that is null",
+                                      nullptr,
+                                      warning);
+                if (locationList.empty())
+                    continue;
+
+                const ErrorLogger::ErrorMessage errmsg(locationList,
+                                                       emptyString,
+                                                       warning ? Severity::warning : Severity::error,
+                                                       "Null pointer dereference: " + unsafeUsage.myArgumentName,
+                                                       "ctunullpointer",
+                                                       CWE476, false);
+                errorLogger.reportErr(errmsg);
+
+                foundErrors = true;
+                break;
+            }
+        }
+    }
+
+    return foundErrors;
 }

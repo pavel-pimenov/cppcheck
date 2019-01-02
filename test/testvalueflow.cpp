@@ -87,6 +87,8 @@ private:
         TEST_CASE(valueFlowForwardTernary);
         TEST_CASE(valueFlowForwardLambda);
 
+        TEST_CASE(valueFlowFwdAnalysis);
+
         TEST_CASE(valueFlowSwitchVariable);
 
         TEST_CASE(valueFlowForLoop);
@@ -537,6 +539,7 @@ private:
         ASSERT_EQUALS(3, valueOfTok("(int)(1+2);", "(").intvalue);
         ASSERT_EQUALS(0, valueOfTok("(UNKNOWN_TYPE*)0;","(").intvalue);
         ASSERT_EQUALS(100, valueOfTok("(int)100.0;", "(").intvalue);
+        ASSERT_EQUALS(10, valueOfTok("x = static_cast<int>(10);", "( 10 )").intvalue);
 
         // Don't calculate if there is UB
         ASSERT(tokenValues(";-1<<10;","<<").empty());
@@ -2338,6 +2341,11 @@ private:
 
     void valueFlowRightShift() {
         const char *code;
+        /* Set some temporary fixed values to simplify testing */
+        const Settings settingsTmp = settings;
+        settings.int_bit = 32;
+        settings.long_bit = 64;
+        settings.long_long_bit = MathLib::bigint_bits * 2;
 
         code = "int f(int a) {\n"
                "  int x = (a & 0xff) >> 16;\n"
@@ -2350,6 +2358,94 @@ private:
                "  return x;\n"
                "}";
         ASSERT_EQUALS(true, testValueOfX(code,3U,0));
+
+        code = "int f(int y) {\n"
+               "  int x = (y & 0xFFFFFFF) >> 31;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(true, testValueOfX(code, 3u, 0));
+
+        code = "int f(int y) {\n"
+               "  int x = (y & 0xFFFFFFF) >> 32;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(false, testValueOfX(code, 3u, 0));
+
+        code = "int f(short y) {\n"
+               "  int x = (y & 0xFFFFFF) >> 31;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(true, testValueOfX(code, 3u, 0));
+
+        code = "int f(short y) {\n"
+               "  int x = (y & 0xFFFFFF) >> 32;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(false, testValueOfX(code, 3u, 0));
+
+        code = "int f(long y) {\n"
+               "  int x = (y & 0xFFFFFF) >> 63;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(true, testValueOfX(code, 3u, 0));
+
+        code = "int f(long y) {\n"
+               "  int x = (y & 0xFFFFFF) >> 64;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(false, testValueOfX(code, 3u, 0));
+
+        code = "int f(long long y) {\n"
+               "  int x = (y & 0xFFFFFF) >> 63;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(true, testValueOfX(code, 3u, 0));
+
+        code = "int f(long long y) {\n"
+               "  int x = (y & 0xFFFFFF) >> 64;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(false, testValueOfX(code, 3u, 0));
+
+        code = "int f(long long y) {\n"
+               "  int x = (y & 0xFFFFFF) >> 121;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(false, testValueOfX(code, 3u, 0));
+
+        code = "int f(long long y) {\n"
+               "  int x = (y & 0xFFFFFF) >> 128;\n"
+               "  return x;\n"
+               "}";
+        ASSERT_EQUALS(false, testValueOfX(code, 3u, 0));
+
+        settings = settingsTmp;
+    }
+
+    void valueFlowFwdAnalysis() {
+        const char *code;
+        std::list<ValueFlow::Value> values;
+
+        code = "void f() {\n"
+               "  struct Foo foo;\n"
+               "  foo.x = 1;\n"
+               "  x = 0 + foo.x;\n" // <- foo.x is 1
+               "}";
+        values = tokenValues(code, "+");
+        ASSERT_EQUALS(1U, values.size());
+        ASSERT_EQUALS(true, values.front().isKnown());
+        ASSERT_EQUALS(true, values.front().isIntValue());
+        ASSERT_EQUALS(1, values.front().intvalue);
+
+        code = "void f() {\n"
+               "  Hints hints;\n"
+               "  hints.x = 1;\n"
+               "  if (foo)\n"
+               "    hints.x = 2;\n"
+               "  x = 0 + foo.x;\n" // <- foo.x is possible 1, possible 2
+               "}";
+        values = tokenValues(code, "+");
+        TODO_ASSERT_EQUALS(2U, 0U, values.size()); // should be 2
     }
 
     void valueFlowSwitchVariable() {

@@ -126,6 +126,7 @@ private:
         TEST_CASE(localvaralias14); // ticket #5619
         TEST_CASE(localvaralias15); // ticket #6315
         TEST_CASE(localvaralias16);
+        TEST_CASE(localvaralias17); // ticket #8911
         TEST_CASE(localvarasm);
         TEST_CASE(localvarstatic);
         TEST_CASE(localvarextern);
@@ -809,7 +810,8 @@ private:
                               "        d += code;\n"
                               "    }\n"
                               "}");
-        TODO_ASSERT_EQUALS("[test.cpp:7]: (style) Variable 'd' is assigned a value that is never used.\n", "", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style) Variable 'd' is assigned a value that is never used.\n"
+                      "[test.cpp:7]: (style) Variable 'd' is assigned a value that is never used.\n", errout.str());
 
         functionVariableUsage("void foo()\n"
                               "{\n"
@@ -868,7 +870,8 @@ private:
                               "        d += code;\n"
                               "    } while(code < 20);\n"
                               "}");
-        TODO_ASSERT_EQUALS("[test.cpp:7]: (style) Variable 'd' is assigned a value that is never used.\n", "", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style) Variable 'd' is assigned a value that is never used.\n"
+                      "[test.cpp:7]: (style) Variable 'd' is assigned a value that is never used.\n", errout.str());
 
         functionVariableUsage("void foo()\n"
                               "{\n"
@@ -2179,6 +2182,15 @@ private:
                               "        status = x;\n"
                               "}");
         ASSERT_EQUALS("", errout.str());
+
+        functionVariableUsage("void f()\n"
+                              "{\n"
+                              "    int sum = 0U;\n"
+                              "    for (i = 0U; i < 2U; i++)\n"
+                              "        sum += 123;\n"
+                              "}");
+        ASSERT_EQUALS("[test.cpp:3]: (style) Variable 'sum' is assigned a value that is never used.\n"
+                      "[test.cpp:5]: (style) Variable 'sum' is assigned a value that is never used.\n", errout.str());
     }
 
     void localvaralias1() {
@@ -3174,6 +3186,15 @@ private:
         ASSERT_EQUALS("", errout.str());
     }
 
+    void localvaralias17() {
+        functionVariableUsage("void f() {\n"
+                              "  int x;\n"
+                              "  unknown_type p = &x;\n"
+                              "  *p = 9;\n"
+                              "}", "test.c");
+        ASSERT_EQUALS("", errout.str());
+    }
+
     void localvarasm() {
 
         functionVariableUsage("void foo(int &b)\n"
@@ -3442,7 +3463,8 @@ private:
                               "    int b = 2;\n"
                               "    a |= b;\n"
                               "}");
-        ASSERT_EQUALS("[test.cpp:5]: (style) Variable 'a' is assigned a value that is never used.\n", errout.str());
+        ASSERT_EQUALS("[test.cpp:3]: (style) Variable 'a' is assigned a value that is never used.\n"
+                      "[test.cpp:5]: (style) Variable 'a' is assigned a value that is never used.\n", errout.str());
 
         functionVariableUsage("void foo() {\n"
                               "    int a = 1;\n"

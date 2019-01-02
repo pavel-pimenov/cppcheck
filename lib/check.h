@@ -35,6 +35,10 @@ namespace tinyxml2 {
     class XMLElement;
 }
 
+namespace CTU {
+    class FileInfo;
+}
+
 /** Use WRONG_DATA in checkers to mark conditions that check that data is correct */
 #define WRONG_DATA(COND, TOK)  (wrongData((TOK), (COND), #COND))
 
@@ -89,7 +93,7 @@ public:
     static void reportError(const ErrorLogger::ErrorMessage &errmsg);
 
     /** Base class used for whole-program analysis */
-    class FileInfo {
+    class CPPCHECKLIB FileInfo {
     public:
         FileInfo() {}
         virtual ~FileInfo() {}
@@ -110,7 +114,8 @@ public:
     }
 
     // Return true if an error is reported.
-    virtual bool analyseWholeProgram(const std::list<FileInfo*> &fileInfo, const Settings& settings, ErrorLogger &errorLogger) {
+    virtual bool analyseWholeProgram(const CTU::FileInfo *ctu, const std::list<FileInfo*> &fileInfo, const Settings& settings, ErrorLogger &errorLogger) {
+        (void)ctu;
         (void)fileInfo;
         (void)settings;
         (void)errorLogger;

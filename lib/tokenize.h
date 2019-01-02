@@ -51,6 +51,8 @@ class CPPCHECKLIB Tokenizer {
     friend class TestSimplifyTypedef;
     friend class TestTokenizer;
     friend class SymbolDatabase;
+    friend class TestSimplifyTemplate;
+    friend class TemplateSimplifier;
 
     /** Class used in Tokenizer::setVarIdPass1 */
     class VariableMap {
@@ -638,7 +640,7 @@ private:
     void simplifyCallingConvention();
 
     /**
-     * Remove __attribute__ ((?))
+     * Remove \__attribute\__ ((?))
      */
     void simplifyAttribute();
 
@@ -658,7 +660,7 @@ private:
     void simplifyAsm2();
 
     /**
-     * Simplify @..
+     * Simplify \@&hellip;  (compiler extension)
      */
     void simplifyAt();
 

@@ -175,7 +175,7 @@ Tokenizer::Tokenizer(const Settings *settings, ErrorLogger *errorLogger) :
     // make sure settings are specified
     assert(mSettings);
 
-    mTemplateSimplifier = new TemplateSimplifier(list, settings, errorLogger);
+    mTemplateSimplifier = new TemplateSimplifier(this);
 }
 
 Tokenizer::~Tokenizer()
@@ -3817,11 +3817,12 @@ bool Tokenizer::simplifyTokenList1(const char FileName[])
     // When the assembly code has been cleaned up, no @ is allowed
     for (const Token *tok = list.front(); tok; tok = tok->next()) {
         if (tok->str() == "(") {
+            const Token *tok1 = tok;
             tok = tok->link();
             if (!tok)
-                syntaxError(nullptr);
+                syntaxError(tok1);
         } else if (tok->str() == "@") {
-            syntaxError(nullptr);
+            syntaxError(tok);
         }
     }
 
@@ -8462,6 +8463,12 @@ void Tokenizer::findGarbageCode() const
         }
     }
 
+    // UNKNOWN_MACRO(return)
+    for (const Token *tok = tokens(); tok; tok = tok->next()) {
+        if (Token::Match(tok, "throw|return )") && Token::Match(tok->linkAt(1)->previous(), "%name% ("))
+            unknownMacroError(tok->linkAt(1)->previous());
+    }
+
     for (const Token *tok = tokens(); tok; tok = tok->next()) {
         if (Token::Match(tok, "if|while|for|switch")) { // if|while|for|switch (EXPR) { ... }
             if (tok->previous() && !Token::Match(tok->previous(), "%name%|:|;|{|}|(|)|,"))
@@ -9406,6 +9413,12 @@ void Tokenizer::simplifyAt()
             var.insert(tok->str());
             tok->isAtAddress(true);
             Token::eraseTokens(tok,tok->tokAt(5));
+        }
+
+        // array declaration
+        if (Token::Match(tok, "] @ %num% ;")) {
+            tok->isAtAddress(true);
+            Token::eraseTokens(tok,tok->tokAt(3));
         }
 
         // keywords in compiler from cosmic software for STM8

@@ -43,7 +43,7 @@ class TokenList;
 /** @brief Simplify templates from the preprocessed and partially simplified code. */
 class CPPCHECKLIB TemplateSimplifier {
 public:
-    TemplateSimplifier(TokenList &tokenlist, const Settings *settings, ErrorLogger *errorLogger);
+    TemplateSimplifier(Tokenizer *tokenizer);
     ~TemplateSimplifier();
 
     /**
@@ -69,17 +69,18 @@ public:
      * Token and its full scopename
      */
     struct TokenAndName {
-        TokenAndName(Token *tok, const std::string &s, const std::string &n, const Token *nt);
+        TokenAndName(Token *tok, const std::string &s, const std::string &n, const Token *nt, const Token *pe = nullptr);
         TokenAndName(const TokenAndName& otherTok);
         ~TokenAndName();
 
         bool operator == (const TokenAndName & rhs) const {
-            return token == rhs.token && scope == rhs.scope && name == rhs.name && nameToken == rhs.nameToken;
+            return token == rhs.token && scope == rhs.scope && name == rhs.name && nameToken == rhs.nameToken && paramEnd == rhs.paramEnd;;
         }
         Token *token;
         std::string scope;
         std::string name;
         const Token *nameToken;
+        const Token *paramEnd;
     };
 
     /**
@@ -98,7 +99,15 @@ public:
      * @return -1 to bail out or positive integer to identity the position
      * of the template name.
      */
-    static int getTemplateNamePosition(const Token *tok, bool forward = false);
+    int getTemplateNamePosition(const Token *tok, bool forward = false);
+
+    /**
+     * Get template name position
+     * @param tok The ">" token e.g. before "class"
+     * @param namepos return offset to name
+     * @return true if name found, false if not
+     * */
+    bool getTemplateNamePositionTemplateFunction(const Token *tok, int &namepos);
 
     /**
      * Simplify templates
@@ -149,6 +158,12 @@ private:
     void useDefaultArgumentValues();
 
     /**
+     * Try to locate a matching declaration for each user defined
+     * specialization.
+     */
+    void getUserDefinedSpecializations();
+
+    /**
      * simplify template aliases
      */
     void simplifyTemplateAliases();
@@ -186,7 +201,6 @@ private:
     /**
      * Expand a template. Create "expanded" class/function at end of tokenlist.
      * @param templateDeclaration               Template declaration information
-     * @param templateDeclarationToken          Template declaration token
      * @param templateInstantiation             Full name of template
      * @param typeParametersInDeclaration       The type parameters of the template
      * @param newName                           New name of class/function.
@@ -194,7 +208,6 @@ private:
      */
     void expandTemplate(
         const TokenAndName &templateDeclaration,
-        const Token *templateDeclarationToken,
         const TokenAndName &templateInstantiation,
         const std::vector<const Token *> &typeParametersInDeclaration,
         const std::string &newName,
@@ -269,6 +282,7 @@ private:
     std::list<TokenAndName> mTemplateDeclarations;
     std::list<TokenAndName> mTemplateForwardDeclarations;
     std::map<Token *, Token *> mTemplateForwardDeclarationsMap;
+    std::map<Token *, Token *> mTemplateUserSpecializationMap;
     std::list<TokenAndName> mTemplateInstantiations;
     std::list<TokenAndName> mInstantiatedTemplates;
     std::list<TokenAndName> mMemberFunctionsToDelete;

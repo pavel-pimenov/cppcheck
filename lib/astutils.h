@@ -162,9 +162,15 @@ bool isLikelyStreamRead(bool cpp, const Token *op);
 
 bool isConstVarExpression(const Token *tok);
 
+/**
+ * Forward data flow analysis for checks
+ *  - unused value
+ *  - redundant assignment
+ *  - valueflow analysis
+ */
 class FwdAnalysis {
 public:
-    FwdAnalysis(bool cpp, const Library &library) : mCpp(cpp), mLibrary(library), mWhat(What::Reassign) {}
+    FwdAnalysis(bool cpp, const Library &library) : mCpp(cpp), mLibrary(library), mWhat(What::Reassign), mValueFlowKnown(true) {}
 
     bool hasOperand(const Token *tok, const Token *lhs) const;
 
@@ -186,11 +192,17 @@ public:
      */
     bool unusedValue(const Token *expr, const Token *startToken, const Token *endToken);
 
+    struct KnownAndToken {
+        bool known;
+        const Token *token;
+    };
+
+    std::vector<KnownAndToken> valueFlow(const Token *expr, const Token *startToken, const Token *endToken);
+
     /** Is there some possible alias for given expression */
     bool possiblyAliased(const Token *expr, const Token *startToken) const;
 
     static bool isNullOperand(const Token *expr);
-
 private:
     /** Result of forward analysis */
     struct Result {
@@ -208,7 +220,9 @@ private:
 
     const bool mCpp;
     const Library &mLibrary;
-    enum class What { Reassign, UnusedValue } mWhat;
+    enum class What { Reassign, UnusedValue, ValueFlow } mWhat;
+    std::vector<KnownAndToken> mValueFlow;
+    bool mValueFlowKnown;
 };
 
 #endif // astutilsH
